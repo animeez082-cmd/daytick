@@ -1,0 +1,10 @@
+{
+	"appId": "com.shonux.daytick",
+	"appName": "DayTick",
+	"webDir": "www",
+	"plugins": {
+		"LocalNotifications": {
+			"iconColor": "#F5B942"
+		}
+	}
+}
