@@ -281,12 +281,22 @@ const cat = id => S.cats.find(c=>c.id===id) || {name:'—',color:'#5F6874'};
 /* =========================================================
    Notifications (Capacitor LocalNotifications)
    ========================================================= */
+const Alarm = {
+  A:null, ready:false,
+  init(){ const C=window.Capacitor; this.A = C&&C.Plugins&&C.Plugins.DayAlarm; this.ready=!!this.A; },
+  async set(list){ if(!this.ready) return; try{ await this.A.setAlarms({alarms:list}); }catch(e){ console.warn('alarm set',e);} },
+  async cancel(ids){ if(!this.ready||!ids.length) return; try{ await this.A.cancelAll({ids}); }catch(e){} },
+  async stop(){ if(!this.ready) return; try{ await this.A.stopRinging(); }catch(e){} },
+  async canExact(){ if(!this.ready) return true; try{ return (await this.A.canExact()).granted; }catch(e){ return true; } }
+};
+
 const Notif = {
   P: null, ready:false,
   async init(){
     const C = window.Capacitor;
+    Alarm.init();
     this.P = C && C.Plugins && C.Plugins.LocalNotifications;
-    if(!this.P) return; // running in plain browser: UI only
+    if(!this.P){ this.planAll(); return; } // browser: UI only
     try{
       await this.P.createChannel({id:'nag_normal',name:'Reminders',description:'Task reminders',importance:4,visibility:1,vibration:true});
       await this.P.createChannel({id:'nag_loud',name:'Loud reminders',description:'Reminders that stay until done',importance:5,visibility:1,vibration:true});
@@ -324,12 +334,12 @@ const Notif = {
     return x;
   },
   async planAll(){
-    if(!this.ready) return;
-    try{
-      const pend = await this.P.getPending();
-      if(pend.notifications && pend.notifications.length) await this.P.cancel({notifications:pend.notifications.map(n=>({id:n.id}))});
-    }catch(e){}
-    const list=[], now=Date.now(), maxN=S.settings.maxNags||12;
+    const now=Date.now(), maxN=S.settings.maxNags||12;
+    const notifs=[], alarms=[], alarmIds=[];
+    // cancel previously scheduled notifications
+    if(this.ready){
+      try{ const pend=await this.P.getPending(); if(pend.notifications&&pend.notifications.length) await this.P.cancel({notifications:pend.notifications.map(n=>({id:n.id}))}); }catch(e){}
+    }
     S.tasks.forEach((t,ti)=>{
       if(t.nag==='off') return;
       const base=(ti+1)*1000; let occ=0;
@@ -338,40 +348,69 @@ const Notif = {
         if(!occursOn(t,day) || isDone(t,day)) continue;
         let first = atTime(day,t.time).getTime();
         const sn = S.snooze[dkeyOf(t,day)]; if(sn && sn>now) first=Math.max(first,sn);
-        if(first < now) first = now + 15000; // already overdue → start nagging now
-        const chain = occ===0 ? maxN : 1; // full chain only for the next occurrence
+        if(first < now) first = now + 15000;
+        const chain = occ===0 ? maxN : 1;
         for(let k=0;k<chain;k++){
           let at = new Date(first + k*(t.interval||5)*60000);
           at = this.nextActive(at);
-          list.push({
-            id: base + occ*60 + k,
-            title: (t.nag==='loud'?'🔔 ':'')+t.title,
-            body: k===0 ? `${fmt12(t.time)} · tap Done when finished` : `Still waiting · reminder ${k+1}`,
-            schedule:{at, allowWhileIdle:true},
-            channelId: t.nag==='loud'?'nag_loud':'nag_normal',
-            actionTypeId:'NAG',
-            ongoing: t.nag==='loud',
-            autoCancel: t.nag!=='loud',
-            group:'daytick',
-            extra:{taskId:t.id, day}
-          });
+          const id = base + occ*60 + k;
+          if(t.nag==='loud'){
+            alarms.push({id, at:at.getTime(), title:t.title, taskId:t.id, day});
+            alarmIds.push(id);
+          } else {
+            notifs.push({
+              id, title:t.title,
+              body: k===0 ? `${fmt12(t.time)} · tap Done when finished` : `Still waiting · reminder ${k+1}`,
+              schedule:{at, allowWhileIdle:true}, channelId:'nag_normal',
+              actionTypeId:'NAG', autoCancel:true, group:'daytick', extra:{taskId:t.id, day}
+            });
+          }
         }
         occ++;
       }
     });
-    try{ if(list.length) await this.P.schedule({notifications:list.slice(0,450)}); }catch(e){ console.warn('schedule',e); }
-    const pc=document.getElementById('pendCount'); if(pc) pc.textContent=`${Math.min(list.length,450)} reminders scheduled`;
+    // native full-screen alarms for loud tasks
+    if(Alarm.ready){ await Alarm.cancel(this._lastAlarmIds||[]); await Alarm.set(alarms); this._lastAlarmIds=alarmIds; }
+    // notifications for normal tasks
+    if(this.ready){ try{ if(notifs.length) await this.P.schedule({notifications:notifs.slice(0,400)}); }catch(e){ console.warn('schedule',e); } }
+    const pc=document.getElementById('pendCount'); if(pc) pc.textContent=`${alarms.length} alarms · ${notifs.length} notifications`;
   },
+  // called on resume: apply Done/Snooze chosen on the full-screen alarm
+  async drainAlarmAction(){
+    const C=window.Capacitor, P=C&&C.Plugins&&C.Plugins.Preferences;
+    // stored via Android SharedPreferences; read through a tiny bridge if present
+    if(!Alarm.ready) return;
+    try{
+      const raw = await this._readPref();
+      if(!raw) return;
+      const [action,taskId,day]=raw.split('|');
+      const t=S.tasks.find(t=>t.id===taskId);
+      if(t&&day){ const k=dkeyOf(t,day);
+        if(action==='done'){ S.done[k]=Date.now(); delete S.snooze[k]; toast('Done ✓'); }
+        else if(action==='snooze'){ S.snooze[k]=Date.now()+30*60000; toast('Snoozed 30 min'); }
+        DB.save();
+      }
+      await this._clearPref();
+      render();
+    }catch(e){}
+  },
+  async _readPref(){ const A=window.Capacitor?.Plugins?.DayAlarm; if(A&&A.getAction){ try{ return (await A.getAction()).value||''; }catch(e){} } return ''; },
+  async _clearPref(){ const A=window.Capacitor?.Plugins?.DayAlarm; if(A&&A.clearAction){ try{ await A.clearAction(); }catch(e){} } },
   async status(){
-    if(!this.ready) return {notif:'Browser (no notifications)',exact:'—'};
-    let notif='?', exact='?';
-    try{ const p=await this.P.checkPermissions(); notif = p.display==='granted'?'Allowed':'Not allowed'; }catch(e){}
-    try{ const x=await this.P.checkExactNotificationSetting(); exact = x.exact_alarm==='granted'?'Allowed':'Not allowed'; }catch(e){ exact='n/a'; }
+    let notif='—', exact='—';
+    if(this.ready){ try{ const p=await this.P.checkPermissions(); notif = p.display==='granted'?'Allowed':'Not allowed'; }catch(e){} }
+    else notif='Browser (install app)';
+    if(Alarm.ready){ exact = (await Alarm.canExact())?'Allowed':'Not allowed'; }
     return {notif,exact};
   },
   async test(){
-    if(!this.ready){ toast('Notifications only work in the installed app'); return; }
-    await this.P.schedule({notifications:[{id:999999,title:'DayTick test',body:'Reminders are working ✓',schedule:{at:new Date(Date.now()+10000),allowWhileIdle:true},channelId:'nag_loud'}]});
+    if(Alarm.ready){
+      await Alarm.set([{id:999999, at:Date.now()+10000, title:'DayTick test alarm', taskId:'', day:''}]);
+      toast('Alarm in 10 s — lock the phone now');
+      return;
+    }
+    if(!this.ready){ toast('Alarms only work in the installed app'); return; }
+    await this.P.schedule({notifications:[{id:999999,title:'DayTick test',body:'Working ✓',schedule:{at:new Date(Date.now()+10000),allowWhileIdle:true},channelId:'nag_normal'}]});
     toast('Test coming in 10 s — lock the phone');
   }
 };
@@ -477,7 +516,7 @@ function paintForm(){
   $('#fDateWrap').style.visibility = form.repeat==='once'?'visible':'hidden';
   $('#fDays').innerHTML = [1,2,3,4,5,6,0].map(d=>`<button data-d="${d}" class="${form.days.includes(d)?'sel':''}">${DOW[d]}</button>`).join('');
   document.querySelectorAll('#fNag button').forEach(b=>b.classList.toggle('sel',b.dataset.v===form.nag));
-  $('#nagHint').textContent = {off:'No buzz — just shows in your list.',normal:'Buzzes, then repeats until you tap Done. Can be swiped away.',loud:'Buzzes with sound and stays on screen until Done. Can\'t be swiped away.'}[form.nag];
+  $('#nagHint').textContent = {off:'No buzz — just shows in your list.',normal:'Quiet notification, repeats until you tap Done.',loud:'Full-screen ALARM with ringtone — rings over the lock screen until you tap Done. Loud even on silent.'}[form.nag];
   $('#fIntWrap').style.display = form.nag==='off'?'none':'';
   $('#fInt').innerHTML = INTERVALS.map(i=>`<button class="chip ${form.interval===i?'sel':''}" data-i="${i}">${i} min</button>`).join('');
 }
@@ -525,7 +564,7 @@ document.addEventListener('click', async e=>{
   // settings
   if(b.dataset.m){ S.settings.maxNags=+b.dataset.m; DB.save(); openSettings(); Notif.planAll(); return; }
   if(b.id==='btnPerm'){ if(Notif.ready){ await Notif.P.requestPermissions(); openSettings(); } return; }
-  if(b.id==='btnExact'){ if(Notif.ready){ try{ await Notif.P.changeExactNotificationSetting(); }catch(e){} openSettings(); } return; }
+  if(b.id==='btnExact'){ try{ if(Notif.ready&&Notif.P.changeExactNotificationSetting) await Notif.P.changeExactNotificationSetting(); }catch(e){} openSettings(); return; }
   if(b.id==='btnTest'){ Notif.test(); return; }
   if(b.id==='btnExport'){ try{ await navigator.clipboard.writeText(JSON.stringify({tasks:S.tasks,cats:S.cats,settings:S.settings})); toast('Copied — paste it to your brother'); }catch(e){ prompt('Copy this:', JSON.stringify({tasks:S.tasks,cats:S.cats,settings:S.settings})); } return; }
   if(b.id==='btnImport'){ const txt=prompt('Paste backup text:'); if(!txt) return; try{ const d=JSON.parse(txt); if(!Array.isArray(d.tasks)) throw 0; S.tasks=d.tasks; if(d.cats) S.cats=d.cats; if(d.settings) S.settings=d.settings; DB.save(); render(); Notif.planAll(); toast('Imported'); }catch(e){ toast('That text is not a DayTick backup'); } return; }
@@ -534,7 +573,7 @@ $('#scrim').addEventListener('click', closeSheets);
 $('#sStart').addEventListener('change', e=>{ S.settings.start=e.target.value; DB.save(); Notif.planAll(); });
 $('#sEnd').addEventListener('change', e=>{ S.settings.end=e.target.value; DB.save(); Notif.planAll(); });
 $('#fTitle').addEventListener('keydown', e=>{ if(e.key==='Enter') saveTask(); });
-document.addEventListener('visibilitychange', ()=>{ if(!document.hidden){ render(); Notif.planAll(); } });
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden){ Notif.drainAlarmAction(); render(); Notif.planAll(); } });
 setInterval(render, 60000);
 
 render();
