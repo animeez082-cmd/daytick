@@ -33,6 +33,7 @@ public class AlarmActivity extends Activity {
         final String title = getIntent().getStringExtra("title");
         final String taskId = getIntent().getStringExtra("taskId");
         final String day = getIntent().getStringExtra("day");
+        final String kind = getIntent().getStringExtra("kind") == null ? "alarm" : getIntent().getStringExtra("kind");
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -60,21 +61,38 @@ public class AlarmActivity extends Activity {
         tv.setGravity(Gravity.CENTER);
         tv.setPadding(0, 0, 0, dp(40));
 
-        Button done = bigButton("✓  Done", "#5FD3A6", "#0B2A1E");
-        done.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { finishWith("done", taskId, day); }
-        });
-
-        Button snooze = bigButton("Snooze 30 min", "#242B34", "#ECEDEF");
-        snooze.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { finishWith("snooze", taskId, day); }
-        });
+        Button b1, b2, b3 = null;
+        if ("timed".equals(kind)) {
+            bell.setText("⏱");
+            tv.setText("Time's up: " + (title != null ? title.replace("Time's up: ", "") : ""));
+            b1 = bigButton("✓  Done", "#5FD3A6", "#0B2A1E");
+            b1.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { finishWith("done", taskId, day, kind); } });
+            b2 = bigButton("+ 5 min", "#242B34", "#ECEDEF");
+            b2.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { finishWith("add5", taskId, day, kind); } });
+            b3 = bigButton("+ 10 min", "#242B34", "#ECEDEF");
+            b3.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { finishWith("add10", taskId, day, kind); } });
+        } else if ("start".equals(kind)) {
+            bell.setText("▶");
+            b1 = bigButton("Started  ▶", "#5FD3A6", "#0B2A1E");
+            b1.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { finishWith("start", taskId, day, kind); } });
+            b2 = bigButton("Snooze 10 min", "#242B34", "#ECEDEF");
+            b2.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { finishWith("snooze", taskId, day, kind); } });
+        } else {
+            b1 = bigButton("✓  Done", "#5FD3A6", "#0B2A1E");
+            b1.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { finishWith("done", taskId, day, kind); } });
+            b2 = bigButton("Snooze 10 min", "#242B34", "#ECEDEF");
+            b2.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { finishWith("snooze", taskId, day, kind); } });
+        }
+        Button stop = bigButton("Stop sound", "#1B2027", "#9AA3B0");
+        stop.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { finishWith("stop", taskId, day, kind); } });
 
         root.addView(clock);
         root.addView(bell);
         root.addView(tv);
-        root.addView(done);
-        root.addView(snooze);
+        root.addView(b1);
+        root.addView(b2);
+        if (b3 != null) root.addView(b3);
+        root.addView(stop);
         setContentView(root);
     }
 
@@ -95,7 +113,7 @@ public class AlarmActivity extends Activity {
         return btn;
     }
 
-    private void finishWith(String action, String taskId, String day) {
+    private void finishWith(String action, String taskId, String day, String kind) {
         // stop the ringing
         Intent stop = new Intent(this, AlarmService.class);
         stop.setAction("STOP");
@@ -104,7 +122,7 @@ public class AlarmActivity extends Activity {
         try {
             getSharedPreferences("daytick_alarm", MODE_PRIVATE)
                     .edit()
-                    .putString("pending", action + "|" + (taskId == null ? "" : taskId) + "|" + (day == null ? "" : day))
+                    .putString("pending", action + "|" + (taskId == null ? "" : taskId) + "|" + (day == null ? "" : day) + "|" + kind)
                     .apply();
         } catch (Exception ignored) {}
         finish();

@@ -13,6 +13,7 @@ public class AlarmReceiver extends BroadcastReceiver {
         svc.putExtra("title", intent.getStringExtra("title"));
         svc.putExtra("taskId", intent.getStringExtra("taskId"));
         svc.putExtra("day", intent.getStringExtra("day"));
+        svc.putExtra("kind", intent.getStringExtra("kind"));
         if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(svc);
         else ctx.startService(svc);
     }

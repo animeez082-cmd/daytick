@@ -21,6 +21,7 @@ public class AlarmService extends Service {
     static final String CH = "daytick_alarm";
     static final int NOTIF_ID = 424242;
     private Ringtone ringtone;
+    private final android.os.Handler autoStop = new android.os.Handler(android.os.Looper.getMainLooper());
     private Vibrator vibrator;
 
     @Override public IBinder onBind(Intent i) { return null; }
@@ -33,6 +34,8 @@ public class AlarmService extends Service {
         String title = intent != null ? intent.getStringExtra("title") : "Reminder";
         String taskId = intent != null ? intent.getStringExtra("taskId") : "";
         String day = intent != null ? intent.getStringExtra("day") : "";
+        String kind = intent != null ? intent.getStringExtra("kind") : "alarm";
+        if (kind == null) kind = "alarm";
         if (title == null) title = "Reminder";
 
         ensureChannel();
@@ -43,13 +46,14 @@ public class AlarmService extends Service {
         full.putExtra("title", title);
         full.putExtra("taskId", taskId);
         full.putExtra("day", day);
+        full.putExtra("kind", kind);
         int piFlags = PendingIntent.FLAG_UPDATE_CURRENT;
         if (Build.VERSION.SDK_INT >= 23) piFlags |= PendingIntent.FLAG_IMMUTABLE;
         PendingIntent fsPi = PendingIntent.getActivity(this, 1001, full, piFlags);
 
         Notification.Builder b = (Build.VERSION.SDK_INT >= 26)
                 ? new Notification.Builder(this, CH) : new Notification.Builder(this);
-        b.setContentTitle("⏰ " + title)
+        b.setContentTitle(("timed".equals(kind) ? "⏱ " : "start".equals(kind) ? "▶ " : "⏰ ") + title)
          .setContentText("Tap to open · reminder")
          .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
          .setCategory(Notification.CATEGORY_ALARM)
@@ -62,8 +66,11 @@ public class AlarmService extends Service {
         Notification n = b.build();
         startForeground(NOTIF_ID, n);
 
+        stopSoundOnly();
         startSound();
-        return START_STICKY;
+        autoStop.removeCallbacksAndMessages(null);
+        autoStop.postDelayed(new Runnable(){ @Override public void run(){ stopEverything(); } }, 3*60*1000);
+        return START_NOT_STICKY;
     }
 
     private void startSound() {
@@ -92,7 +99,13 @@ public class AlarmService extends Service {
         } catch (Exception ignored) {}
     }
 
+    private void stopSoundOnly() {
+        try { if (ringtone != null && ringtone.isPlaying()) ringtone.stop(); } catch (Exception ignored) {}
+        try { if (vibrator != null) vibrator.cancel(); } catch (Exception ignored) {}
+    }
+
     private void stopEverything() {
+        autoStop.removeCallbacksAndMessages(null);
         try { if (ringtone != null && ringtone.isPlaying()) ringtone.stop(); } catch (Exception ignored) {}
         try { if (vibrator != null) vibrator.cancel(); } catch (Exception ignored) {}
         if (Build.VERSION.SDK_INT >= 24) stopForeground(Service.STOP_FOREGROUND_REMOVE);
