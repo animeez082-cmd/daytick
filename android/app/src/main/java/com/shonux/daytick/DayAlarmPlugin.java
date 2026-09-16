@@ -104,6 +104,44 @@ public class DayAlarmPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void setWidget(PluginCall call) {
+        String json = call.getString("json", "");
+        getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString("widget", json).apply();
+        TodayWidget.refreshAll(getContext());
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void setIcon(PluginCall call) {
+        String want = call.getString("name", "classic");
+        String[] all = {"classic","ocean","lavender","forest","neon"};
+        android.content.pm.PackageManager pm = getContext().getPackageManager();
+        String pkg = getContext().getPackageName();
+        try {
+            for (String n : all) {
+                String cls = pkg + ".Icon" + Character.toUpperCase(n.charAt(0)) + n.substring(1);
+                int state = n.equals(want) ? android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED : android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED;
+                pm.setComponentEnabledSetting(new android.content.ComponentName(pkg, cls), state, android.content.pm.PackageManager.DONT_KILL_APP);
+            }
+            getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString("icon", want).apply();
+            call.resolve();
+        } catch (Exception e) { call.reject("icon change failed: " + e.getMessage()); }
+    }
+
+    @PluginMethod
+    public void openChannelSettings(PluginCall call) {
+        try {
+            String ch = call.getString("channel", "");
+            Intent i = new Intent(Build.VERSION.SDK_INT >= 26 ? (ch.isEmpty() ? android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS : android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS) : android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+            i.putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, getContext().getPackageName());
+            if (!ch.isEmpty()) i.putExtra(android.provider.Settings.EXTRA_CHANNEL_ID, ch);
+            i.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(i);
+        } catch (Exception ignored) {}
+        call.resolve();
+    }
+
+    @PluginMethod
     public void canExact(PluginCall call) {
         boolean ok = true;
         if (Build.VERSION.SDK_INT >= 31) {

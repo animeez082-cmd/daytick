@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="icon_bg_classic">#1A1D24</color>
+    <color name="icon_bg_ocean">#0B1B26</color>
+    <color name="icon_bg_lavender">#1C1630</color>
+    <color name="icon_bg_forest">#0F1F16</color>
+    <color name="icon_bg_neon">#0D0A1E</color>
+</resources>

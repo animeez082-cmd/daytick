@@ -31,6 +31,9 @@ public class AlarmActivity extends Activity {
     private Ringtone ringtone;
     private Vibrator vibrator;
     private ValueAnimator pulse;
+    private final android.content.BroadcastReceiver closer = new android.content.BroadcastReceiver() {
+        @Override public void onReceive(Context c, Intent i) { stopAlarm(); finish(); }
+    };
 
     // theme → [bgTop, bgBottom, accent, accentInk]
     private static String[] palette(String theme) {
@@ -56,137 +59,109 @@ public class AlarmActivity extends Activity {
         playAlarm();
 
         if (Build.VERSION.SDK_INT >= 27) { setShowWhenLocked(true); setTurnScreenOn(true); }
-        else {
-            getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
-                    | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
+                | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                | WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD);
+        if (Build.VERSION.SDK_INT >= 21) {
+            getWindow().setStatusBarColor(Color.TRANSPARENT);
+            getWindow().setNavigationBarColor(Color.parseColor("#0C0E12"));
         }
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
         final String title  = getIntent().getStringExtra("title");
         final String taskId = getIntent().getStringExtra("taskId");
         final String day    = getIntent().getStringExtra("day");
         final String kind   = getIntent().getStringExtra("kind") == null ? "alarm" : getIntent().getStringExtra("kind");
         String theme = getSharedPreferences("daytick_alarm", MODE_PRIVATE).getString("theme", "midnight");
+        if ("light".equals(theme)) theme = "midnight"; // alarm screen is always dark for readability at night
         String emoji = getSharedPreferences("daytick_alarm", MODE_PRIVATE).getString("emoji_" + taskId, "⏰");
         String[] p = palette(theme);
-        boolean light = "light".equals(theme);
-        int ink  = light ? Color.parseColor("#151A21") : Color.parseColor("#F2F4F7");
-        int ink2 = light ? Color.parseColor("#5B6572") : Color.parseColor("#A2ACBA");
+        int ink  = Color.parseColor("#F2F4F7");
+        int ink2 = Color.parseColor("#A2ACBA");
         int accent = Color.parseColor(p[2]);
 
-        // ---- background gradient ----
-        FrameLayout root = new FrameLayout(this);
-        GradientDrawable bg = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{Color.parseColor(p[0]), Color.parseColor(p[1])});
-        root.setBackground(bg);
+        // ---- root: solid gradient background, vertical column, buttons pinned at bottom ----
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{Color.parseColor(p[0]), Color.parseColor(p[1])}));
+        int pad = dp(24);
+        root.setPadding(pad, dp(56), pad, dp(24));
+        root.setGravity(Gravity.CENTER_HORIZONTAL);
 
-        // soft accent glow blob behind the icon
-        View glow = new View(this);
-        GradientDrawable g = new GradientDrawable();
-        g.setShape(GradientDrawable.OVAL);
-        g.setColors(new int[]{withAlpha(accent, 0x55), withAlpha(accent, 0x00)});
-        g.setGradientType(GradientDrawable.RADIAL_GRADIENT);
-        g.setGradientRadius(dp(220));
-        glow.setBackground(g);
-        FrameLayout.LayoutParams gl = new FrameLayout.LayoutParams(dp(440), dp(440), Gravity.CENTER_HORIZONTAL | Gravity.TOP);
-        gl.topMargin = dp(40);
-        root.addView(glow, gl);
+        TextView label = text("timed".equals(kind) ? "TIME'S UP" : "start".equals(kind) ? "TIME TO START" : "DAYTICK ALARM", 13, accent, true);
+        label.setLetterSpacing(0.18f); label.setGravity(Gravity.CENTER);
+        root.addView(label, wrap());
 
-        LinearLayout col = new LinearLayout(this);
-        col.setOrientation(LinearLayout.VERTICAL);
-        col.setGravity(Gravity.CENTER_HORIZONTAL);
-        int pad = dp(28);
-        col.setPadding(pad, dp(56), pad, dp(28));
+        TextView clock = text(android.text.format.DateFormat.getTimeFormat(this).format(new java.util.Date()), 56, ink, true);
+        clock.setGravity(Gravity.CENTER); clock.setLetterSpacing(-0.03f);
+        LinearLayout.LayoutParams cl = wrap(); cl.topMargin = dp(6); cl.bottomMargin = dp(26);
+        root.addView(clock, cl);
 
-        TextView label = text("timed".equals(kind) ? "TIME'S UP" : "start".equals(kind) ? "TIME TO START" : "DAYTICK ALARM", 13, ink2, false);
-        label.setLetterSpacing(0.18f);
-        label.setGravity(Gravity.CENTER);
-
-        TextView clock = text(android.text.format.DateFormat.getTimeFormat(this).format(new java.util.Date()), 64, ink, true);
-        clock.setGravity(Gravity.CENTER);
-        clock.setLetterSpacing(-0.03f);
-        clock.setPadding(0, dp(6), 0, dp(26));
-
-        // icon circle
+        // icon in a glowing ring
         FrameLayout iconWrap = new FrameLayout(this);
+        View glow = new View(this);
+        GradientDrawable g = new GradientDrawable(); g.setShape(GradientDrawable.OVAL);
+        g.setColors(new int[]{withAlpha(accent, 0x66), withAlpha(accent, 0x00)}); g.setGradientType(GradientDrawable.RADIAL_GRADIENT); g.setGradientRadius(dp(120));
+        glow.setBackground(g);
+        iconWrap.addView(glow, new FrameLayout.LayoutParams(dp(240), dp(240), Gravity.CENTER));
         View ring = new View(this);
-        GradientDrawable rd = new GradientDrawable();
-        rd.setShape(GradientDrawable.OVAL);
-        rd.setColor(withAlpha(accent, 0x22));
-        rd.setStroke(dp(2), withAlpha(accent, 0x88));
+        GradientDrawable rd = new GradientDrawable(); rd.setShape(GradientDrawable.OVAL); rd.setColor(withAlpha(accent, 0x26)); rd.setStroke(dp(2), withAlpha(accent, 0xAA));
         ring.setBackground(rd);
         iconWrap.addView(ring, new FrameLayout.LayoutParams(dp(132), dp(132), Gravity.CENTER));
-        TextView ico = text(emoji, 56, ink, false);
-        ico.setGravity(Gravity.CENTER);
+        TextView ico = text(emoji, 54, ink, false); ico.setGravity(Gravity.CENTER);
         iconWrap.addView(ico, new FrameLayout.LayoutParams(dp(132), dp(132), Gravity.CENTER));
-        LinearLayout.LayoutParams iw = new LinearLayout.LayoutParams(dp(132), dp(132));
-        iw.bottomMargin = dp(22);
-        iconWrap.setLayoutParams(iw);
+        LinearLayout.LayoutParams iw = new LinearLayout.LayoutParams(dp(240), dp(240)); iw.bottomMargin = dp(4); iw.topMargin = dp(-40);
+        root.addView(iconWrap, iw);
+        try {
+            pulse = ValueAnimator.ofFloat(1f, 1.07f); pulse.setDuration(900); pulse.setRepeatMode(ValueAnimator.REVERSE); pulse.setRepeatCount(ValueAnimator.INFINITE);
+            final View rr = ring; pulse.addUpdateListener(a -> { float v = (float) a.getAnimatedValue(); rr.setScaleX(v); rr.setScaleY(v); }); pulse.start();
+        } catch (Exception ignored) {}
 
-        // gentle pulse on the ring
-        pulse = ValueAnimator.ofFloat(1f, 1.08f);
-        pulse.setDuration(900); pulse.setRepeatMode(ValueAnimator.REVERSE); pulse.setRepeatCount(ValueAnimator.INFINITE);
-        pulse.setInterpolator(new AccelerateDecelerateInterpolator());
-        final View ringRef = ring;
-        pulse.addUpdateListener(a -> { float v = (float) a.getAnimatedValue(); ringRef.setScaleX(v); ringRef.setScaleY(v); });
-        pulse.start();
-
-        TextView tv = text(title != null ? title.replace("Time's up: ", "") : "Reminder", 28, ink, true);
-        tv.setGravity(Gravity.CENTER);
-        tv.setLineSpacing(0, 1.1f);
-        tv.setPadding(0, 0, 0, dp(6));
+        TextView tv = text(title != null ? title.replace("Time's up: ", "") : "Reminder", 27, ink, true);
+        tv.setGravity(Gravity.CENTER); tv.setLineSpacing(0, 1.1f); tv.setMaxLines(3);
+        root.addView(tv, wrap());
 
         TextView sub = text("timed".equals(kind) ? "Your timed task has finished." : "start".equals(kind) ? "Tap Started when you begin." : "Tap Done when it's handled.", 15, ink2, false);
         sub.setGravity(Gravity.CENTER);
-        sub.setPadding(0, 0, 0, dp(28));
+        LinearLayout.LayoutParams sl = wrap(); sl.topMargin = dp(6);
+        root.addView(sub, sl);
 
-        col.addView(label); col.addView(clock); col.addView(iconWrap); col.addView(tv); col.addView(sub);
+        // flexible spacer pushes buttons to the bottom
+        View spacer = new View(this);
+        root.addView(spacer, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
-        // spacer
-        View sp = new View(this); col.addView(sp, new LinearLayout.LayoutParams(1, 0, 1f));
-
-        // ---- buttons ----
-        String[] pri = { "✓  Done", p[2], p[3] };
-        Button b1, b2, b3 = null;
-        String secBg = light ? "#FFFFFF" : "#FFFFFF1A"; String secFg = light ? "#151A21" : "#F2F4F7";
+        String secBg = "#26FFFFFF", secFg = "#F2F4F7";
         if ("timed".equals(kind)) {
-            b1 = bigButton("✓  Done", pri[1], pri[2], true);
+            Button b1 = bigButton("✓  Done", p[2], p[3], true);
             b1.setOnClickListener(v -> finishWith("done", taskId, day, kind));
+            root.addView(b1);
             LinearLayout row = new LinearLayout(this); row.setOrientation(LinearLayout.HORIZONTAL);
-            b2 = bigButton("+ 5 min", secBg, secFg, false);
-            b3 = bigButton("+ 10 min", secBg, secFg, false);
-            b2.setOnClickListener(v -> finishWith("add5", taskId, day, kind));
-            b3.setOnClickListener(v -> finishWith("add10", taskId, day, kind));
+            Button b2 = bigButton("+ 5 min", secBg, secFg, false), b3 = bigButton("+ 10 min", secBg, secFg, false);
+            b2.setOnClickListener(v -> finishWith("add5", taskId, day, kind)); b3.setOnClickListener(v -> finishWith("add10", taskId, day, kind));
             LinearLayout.LayoutParams h1 = new LinearLayout.LayoutParams(0, dp(58), 1f); h1.rightMargin = dp(6);
             LinearLayout.LayoutParams h2 = new LinearLayout.LayoutParams(0, dp(58), 1f); h2.leftMargin = dp(6);
             row.addView(b2, h1); row.addView(b3, h2);
             LinearLayout.LayoutParams rl = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT); rl.topMargin = dp(10);
-            col.addView(b1); col.addView(row, rl);
+            root.addView(row, rl);
         } else if ("start".equals(kind)) {
-            b1 = bigButton("Started  ▶", pri[1], pri[2], true);
-            b1.setOnClickListener(v -> finishWith("start", taskId, day, kind));
-            b2 = bigButton("Snooze 10 min", secBg, secFg, false);
-            b2.setOnClickListener(v -> finishWith("snooze", taskId, day, kind));
-            col.addView(b1); col.addView(b2);
+            Button b1 = bigButton("Started  ▶", p[2], p[3], true); b1.setOnClickListener(v -> finishWith("start", taskId, day, kind));
+            Button b2 = bigButton("Snooze 10 min", secBg, secFg, false); b2.setOnClickListener(v -> finishWith("snooze", taskId, day, kind));
+            root.addView(b1); root.addView(b2);
         } else {
-            b1 = bigButton("✓  Done", pri[1], pri[2], true);
-            b1.setOnClickListener(v -> finishWith("done", taskId, day, kind));
-            b2 = bigButton("Snooze 10 min", secBg, secFg, false);
-            b2.setOnClickListener(v -> finishWith("snooze", taskId, day, kind));
-            col.addView(b1); col.addView(b2);
+            Button b1 = bigButton("✓  Done", p[2], p[3], true); b1.setOnClickListener(v -> finishWith("done", taskId, day, kind));
+            Button b2 = bigButton("Snooze 10 min", secBg, secFg, false); b2.setOnClickListener(v -> finishWith("snooze", taskId, day, kind));
+            root.addView(b1); root.addView(b2);
         }
         TextView stop = text("Stop sound", 14, ink2, false);
-        stop.setGravity(Gravity.CENTER); stop.setPadding(0, dp(18), 0, 0);
-        stop.setOnClickListener(v -> { stopAlarm(); try { Intent s = new Intent(this, AlarmService.class); s.setAction("STOP"); startService(s);} catch (Exception ignored) {} });
-        col.addView(stop);
+        stop.setGravity(Gravity.CENTER); stop.setPadding(0, dp(16), 0, dp(4));
+        stop.setOnClickListener(v -> { stopAlarm(); try { Intent s2 = new Intent(this, AlarmService.class); s2.setAction("STOP"); startService(s2);} catch (Exception ignored) {} });
+        root.addView(stop, wrap());
 
-        root.addView(col, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         setContentView(root);
-
-        // enter animation
-        col.setAlpha(0f); col.setTranslationY(dp(24));
-        col.animate().alpha(1f).translationY(0).setDuration(320).setInterpolator(new AccelerateDecelerateInterpolator()).start();
+        try { if (Build.VERSION.SDK_INT >= 33) registerReceiver(closer, new android.content.IntentFilter("com.shonux.daytick.CLOSE_ALARM"), Context.RECEIVER_NOT_EXPORTED); else registerReceiver(closer, new android.content.IntentFilter("com.shonux.daytick.CLOSE_ALARM")); } catch (Exception ignored) {}
     }
+
+    private LinearLayout.LayoutParams wrap() { return new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT); }
 
     private TextView text(String s, int sp, int color, boolean bold) {
         TextView t = new TextView(this);
@@ -253,7 +228,7 @@ public class AlarmActivity extends Activity {
         try { if (vibrator != null) vibrator.cancel(); } catch (Exception ignored) {}
         try { if (pulse != null) pulse.cancel(); } catch (Exception ignored) {}
     }
-    @Override protected void onDestroy() { stopAlarm(); super.onDestroy(); }
+    @Override protected void onDestroy() { stopAlarm(); try { unregisterReceiver(closer); } catch (Exception ignored) {} super.onDestroy(); }
     private int dp(int v) { return (int) (v * getResources().getDisplayMetrics().density); }
     @Override public void onBackPressed() { }
 }

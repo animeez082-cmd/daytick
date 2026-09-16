@@ -4,4 +4,5 @@
     <string name="title_activity_main">DayTick</string>
     <string name="package_name">com.shonux.daytick</string>
     <string name="custom_url_scheme">com.shonux.daytick</string>
+    <string name="widget_desc">Today's progress and next tasks</string>
 </resources>
