@@ -63,8 +63,11 @@ public class DayAlarmPlugin extends Plugin {
             scheduleOne(ctx, o.optInt("id"), o.optLong("at"), o.optString("title", "Reminder"),
                     o.optString("taskId", ""), o.optString("day", ""), o.optString("kind", "alarm"));
         }
-        // persist so BootReceiver can re-register after a restart
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString("alarms", arr.toString()).apply();
+        // persist so BootReceiver can re-register after a restart; also theme + per-task emoji for the alarm screen
+        SharedPreferences.Editor ed = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString("alarms", arr.toString());
+        String theme = call.getString("theme"); if (theme != null) ed.putString("theme", theme);
+        for (int k = 0; k < arr.length(); k++) { JSONObject o = arr.optJSONObject(k); if (o != null && o.has("emoji")) ed.putString("emoji_" + o.optString("taskId",""), o.optString("emoji","⏰")); }
+        ed.apply();
         call.resolve();
     }
 

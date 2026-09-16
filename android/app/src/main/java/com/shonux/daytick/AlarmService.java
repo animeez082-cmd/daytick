@@ -66,8 +66,8 @@ public class AlarmService extends Service {
         Notification n = b.build();
         startForeground(NOTIF_ID, n);
 
-        stopSoundOnly();
-        startSound();
+        // Sound + vibration are handled by AlarmActivity (reliable on Android 14+ even when
+        // this service is restricted). Service only holds the ongoing notification.
         autoStop.removeCallbacksAndMessages(null);
         autoStop.postDelayed(new Runnable(){ @Override public void run(){ stopEverything(); } }, 3*60*1000);
         return START_NOT_STICKY;
